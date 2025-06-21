@@ -1,0 +1,4 @@
+﻿venv/
+__pycache__/
+data/l1_day.csv
+"kafka/" 
