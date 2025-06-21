@@ -4,7 +4,7 @@ import pandas as pd
 import math
 
 ORDER_SIZE = 5000
-CHUNK_SIZE = 100  # shares per step
+CHUNK_SIZE = 100  #shares
 
 
 def compute_cost(split, venues, order_size, lambda_over, lambda_under, theta_queue):
@@ -71,9 +71,9 @@ def run_backtest(lambda_over, lambda_under, theta_queue):
         if current_ts is None:
             current_ts = ts
 
-        # when timestamp changes, process snapshot
+        #Debugging - change timestamps
         if ts != current_ts:
-            snapshots.append(list(venues))  # record snapshot
+            snapshots.append(list(venues))
             avail = sum(v['ask_size'] for v in venues)
             to_alloc = min(unfilled, avail)
 
@@ -99,33 +99,33 @@ def run_backtest(lambda_over, lambda_under, theta_queue):
             'rebate': 0.0,
         })
 
-    # run baselines
+    #run baselines
     baselines = {}
     baselines['best_ask'] = run_best_ask(snapshots)
     baselines['twap'] = run_twap(snapshots)
     baselines['vwap'] = run_vwap(snapshots)
 
-    # compute optimized result
+    #compute optimized result
     optimized = {
         'total_cash': cumulative_cash,
         'avg_fill_px': cumulative_cash / ORDER_SIZE if ORDER_SIZE else 0
     }
 
-    # compute savings in bps
+    #compute savings in bps
     savings = {}
     for key, base in baselines.items():
         savings[key] = ((base['avg_fill_px'] - optimized['avg_fill_px']) / base['avg_fill_px']) * 10000
 
     return optimized, baselines, savings
 
-
+#baseline #1
 def run_best_ask(snapshots):
     rem = ORDER_SIZE
     cash = 0.0
     for venues in snapshots:
         if rem <= 0:
             break
-        # flatten asks
+        #flatten asks
         asks = sorted([(v['ask'], v['ask_size']) for v in venues], key=lambda x: x[0])
         for price, size in asks:
             exe = min(size, rem)
@@ -135,7 +135,7 @@ def run_best_ask(snapshots):
                 break
     return {'total_cash': cash, 'avg_fill_px': cash / ORDER_SIZE}
 
-
+#baseline #2
 def run_twap(snapshots):
     intervals = len(snapshots)
     if intervals == 0:
@@ -158,7 +158,7 @@ def run_twap(snapshots):
                 break
     return {'total_cash': cash, 'avg_fill_px': cash / ORDER_SIZE}
 
-
+#baseline #3
 def run_vwap(snapshots):
     volumes = [sum(v['ask_size'] for v in venues) for venues in snapshots]
     total_vol = sum(volumes)
