@@ -21,7 +21,7 @@ window = df[(df.ts_event >= start_time) & (df.ts_event <= end_time)].copy()
 print(f"Filtering between {start_time} and {end_time} yields {len(window)} rows")
 
 if window.empty:
-    print("Still no data? Check the printed span above.")
+    print("No data")
     exit(0)
 
 
