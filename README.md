@@ -1,3 +1,8 @@
+#Link to the video recording:
+
+https://www.loom.com/share/e8bc5595a886479b80d35432c3330636?sid=4342e9e2-e416-4709-96ca-4e57fc3da3c1
+
+
 ## Overview
 
 This repo implements a real-time Smart Order Router (SOR) backtest using:
