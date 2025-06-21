@@ -124,12 +124,12 @@ def run_backtest_for_params(lambda_over, lambda_under, theta_queue):
     consumer = KafkaConsumer(
         'mock_l1_stream',
         bootstrap_servers='localhost:9092',
-        group_id=None,  # unique group so we read from beginning each time if needed
+        group_id=None,
         auto_offset_reset='earliest',
         enable_auto_commit=False,
         value_deserializer=lambda m: json.loads(m.decode('utf-8'))
     )
-    # You may want to seek to beginning or to a particular offset. For simplicity assume fresh topic or earliest.
+
     print(f"Running backtest for params λ_over={lambda_over}, λ_under={lambda_under}, θ_queue={theta_queue} ...")
     unfilled = ORDER_SIZE
     cumulative_cash = 0.0
@@ -143,7 +143,7 @@ def run_backtest_for_params(lambda_over, lambda_under, theta_queue):
         if current_ts is None:
             current_ts = ts
 
-        # When timestamp changes, process the snapshot
+        #When timestamp changes, process snapshot
         if ts != current_ts:
             # Save this snapshot’s venues
             snapshots.append(list(venues))
@@ -152,7 +152,7 @@ def run_backtest_for_params(lambda_over, lambda_under, theta_queue):
 
             split, cost_est = allocate(to_alloc, venues, lambda_over, lambda_under, theta_queue)
             if split is None:
-                # if no exact split, fall back to taking all available
+                #if no exact split, fall back to taking all available
                 split = [v['ask_size'] for v in venues]
                 cost_est = compute_cost(split, venues, to_alloc, lambda_over, lambda_under, theta_queue)
 
@@ -163,11 +163,11 @@ def run_backtest_for_params(lambda_over, lambda_under, theta_queue):
             if unfilled == 0:
                 break
 
-            # reset for next timestamp
+            #reset for next timestamp
             venues = []
             current_ts = ts
 
-        # accumulate venue info for this timestamp
+        #accumulate venue info for this timestamp
         venues.append({
             'ask': data['ask_px_00'],
             'ask_size': data['ask_sz_00'],
@@ -175,15 +175,13 @@ def run_backtest_for_params(lambda_over, lambda_under, theta_queue):
             'rebate': 0.0,
         })
 
-    # After loop: if some last snapshot not yet appended and we still unfilled,
-    # you could process one more time. For simplicity we skip.
     consumer.close()
 
     optimized = {
         'total_cash': cumulative_cash,
         'avg_fill_px': (cumulative_cash / ORDER_SIZE) if ORDER_SIZE else 0
     }
-    # run baselines on the collected snapshots
+    #run baselines on the collected snapshots
     baselines = {
         'best_ask': run_best_ask(snapshots),
         'twap': run_twap(snapshots),
@@ -200,20 +198,19 @@ def run_backtest_for_params(lambda_over, lambda_under, theta_queue):
 
 
 def grid_search():
-    # Define search space (example ranges; adjust as needed)
     lambda_over_list = [0.1, 0.2, 0.3, 0.4, 0.5]
     lambda_under_list = [0.1, 0.2, 0.3, 0.4, 0.5]
     theta_queue_list = [0.0, 0.1, 0.2, 0.3, 0.4]
 
     best_result = None
     best_params = None
-    # Track by best savings vs best_ask
+    #track by best savings vs best_ask
     best_savings = -math.inf
 
     for lambda_over, lambda_under, theta_queue in itertools.product(
             lambda_over_list, lambda_under_list, theta_queue_list):
         optimized, baselines, savings = run_backtest_for_params(lambda_over, lambda_under, theta_queue)
-        # pick metric: savings vs best_ask
+        #pick metric: savings vs best_ask
         sav = savings.get('best_ask', 0.0)
         print(f"Params {(lambda_over, lambda_under, theta_queue)} -> savings vs best_ask = {sav:.2f} bps")
         if sav > best_savings:
@@ -225,7 +222,7 @@ def grid_search():
 
 
 if __name__ == "__main__":
-    # Run grid search
+    #Run grid search
     best_params, best_result = grid_search()
     optimized, baselines, savings = best_result
 
