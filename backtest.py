@@ -1,11 +1,13 @@
 import json
 import math
-from kafka import KafkaConsumer
 import pandas as pd
+from kafka import KafkaConsumer
 
+#allocation configuration
 ORDER_SIZE = 5000
-CHUNK_SIZE = 100  #shares per step
+CHUNK_SIZE = 10
 
+#Cost and Allocation
 def compute_cost(split, venues, order_size, lambda_over, lambda_under, theta_queue):
     executed = 0
     cash_spent = 0.0
@@ -21,6 +23,7 @@ def compute_cost(split, venues, order_size, lambda_over, lambda_under, theta_que
     risk_pen  = theta_queue * (underfill + overfill)
     cost_pen  = lambda_under * underfill + lambda_over * overfill
     return cash_spent + risk_pen + cost_pen
+
 
 def allocate(order_size, venues, lambda_over, lambda_under, theta_queue):
     splits = [[]]
@@ -44,9 +47,68 @@ def allocate(order_size, venues, lambda_over, lambda_under, theta_queue):
             best_split = alloc
     return best_split, best_cost
 
-#Baseline #1: greedy Best‐Ask
+#Baselines
+def run_backtest(lambda_over, lambda_under, theta_queue):
+    consumer = KafkaConsumer(
+        'mock_l1_stream',
+        bootstrap_servers='localhost:9092',
+        group_id='backtest-group',
+        auto_offset_reset='earliest',   # start from the beginning of the topic
+        enable_auto_commit=False,
+        value_deserializer=lambda m: json.loads(m.decode('utf-8'))
+    )
+    print("Waiting for new market data...")
+
+    unfilled = ORDER_SIZE
+    cumulative_cash = 0.0
+    current_ts = None
+    venues = []
+    snapshots = []
+
+    for msg in consumer:
+        data = msg.value
+        ts = pd.to_datetime(data['ts_event'])
+
+        if current_ts is None:
+            current_ts = ts
+
+        # when time changes, execute one snapshot
+        if ts != current_ts:
+            snapshots.append(list(venues))
+            avail = sum(v['ask_size'] for v in venues)
+            to_alloc = min(unfilled, avail)
+
+            split, cost_est = allocate(to_alloc, venues, lambda_over, lambda_under, theta_queue)
+            if split is None:
+                split = [v['ask_size'] for v in venues]
+                cost_est = compute_cost(split, venues, to_alloc, lambda_over, lambda_under, theta_queue)
+
+            filled = sum(min(split[i], venues[i]['ask_size']) for i in range(len(venues)))
+            print(f"Snapshot {current_ts} → allocate {to_alloc}, filled {filled}, cost {cost_est:.2f}")
+            cumulative_cash += cost_est
+            unfilled = max(unfilled - filled, 0)
+
+            if unfilled == 0:
+                break
+
+            venues = []
+            current_ts = ts
+
+        # collect venue snapshot
+        venues.append({
+            'ask': data['ask_px_00'],
+            'ask_size': data['ask_sz_00'],
+            'fee': data.get('fee', 0.0),
+            'rebate': data.get('rebate', 0.0),
+        })
+
+    optimized = {'total_cash': cumulative_cash, 'avg_fill_px': cumulative_cash / ORDER_SIZE}
+    return optimized, snapshots
+
+
 def run_best_ask(snapshots):
-    rem, cash = ORDER_SIZE, 0.0
+    rem  = ORDER_SIZE
+    cash = 0.0
     for venues in snapshots:
         if rem <= 0:
             break
@@ -57,125 +119,103 @@ def run_best_ask(snapshots):
             rem  -= exe
             if rem == 0:
                 break
-    return {'total_cash': cash, 'avg_fill_px': cash / ORDER_SIZE}
+    executed = ORDER_SIZE - rem
+    return {'total_cash': cash, 'avg_fill_px': cash / ORDER_SIZE, 'executed': executed}
 
-#Baseline #2: TWAP over N snapshots
+
 def run_twap(snapshots):
     intervals = len(snapshots)
     if intervals == 0:
-        return {'total_cash': 0, 'avg_fill_px': 0}
+        return {'total_cash': 0, 'avg_fill_px': 0, 'executed': 0}
     per_slice = math.ceil(ORDER_SIZE / intervals)
-    rem, cash = ORDER_SIZE, 0.0
+    rem = ORDER_SIZE
+    cash = 0.0
     for venues in snapshots:
         if rem <= 0:
             break
         share = min(per_slice, rem)
-        asks = sorted([(v['ask'], v['ask_size']) for v in venues], key=lambda x: x[0])
         filled = 0
+        asks = sorted([(v['ask'], v['ask_size']) for v in venues], key=lambda x: x[0])
         for price, size in asks:
             exe = min(size, share - filled)
             cash += exe * price
+            rem  -= exe
             filled += exe
-            rem    -= exe
             if filled == share:
                 break
-    return {'total_cash': cash, 'avg_fill_px': cash / ORDER_SIZE}
+    executed = ORDER_SIZE - rem
+    return {'total_cash': cash, 'avg_fill_px': cash / ORDER_SIZE, 'executed': executed}
 
-#Baseline #3: VWAP by displayed volume
+
 def run_vwap(snapshots):
-    volumes  = [sum(v['ask_size'] for v in venues) for venues in snapshots]
+    volumes   = [sum(v['ask_size'] for v in venues) for venues in snapshots]
     total_vol = sum(volumes)
-    rem, cash = ORDER_SIZE, 0.0
+    rem = ORDER_SIZE
+    cash = 0.0
     for venues, vol in zip(snapshots, volumes):
         if rem <= 0 or total_vol == 0:
             break
         share = min(math.ceil((vol / total_vol) * ORDER_SIZE), rem)
-        asks = sorted([(v['ask'], v['ask_size']) for v in venues], key=lambda x: x[0])
         filled = 0
+        asks = sorted([(v['ask'], v['ask_size']) for v in venues], key=lambda x: x[0])
         for price, size in asks:
             exe = min(size, share - filled)
             cash += exe * price
+            rem  -= exe
             filled += exe
-            rem    -= exe
             if filled == share:
                 break
-    return {'total_cash': cash, 'avg_fill_px': cash / ORDER_SIZE}
+    executed = ORDER_SIZE - rem
+    return {'total_cash': cash, 'avg_fill_px': cash / ORDER_SIZE, 'executed': executed}
 
-def run_backtest(lambda_over, lambda_under, theta_queue):
-    consumer = KafkaConsumer(
-        'mock_l1_stream',
-        bootstrap_servers='localhost:9092',
-        group_id='backtest-group',
-        auto_offset_reset='latest',
-        enable_auto_commit=False,
-        value_deserializer=lambda m: json.loads(m.decode('utf-8'))
-    )
-    print("Waiting for new market data...")
+#optimization
+def optimize_parameters():
+    coarse_vals = [0.0, 0.5, 1.0]
+    best_params = None
+    best_cash   = math.inf
+    for lo in coarse_vals:
+        for lu in coarse_vals:
+            for th in coarse_vals:
+                opt, _ = run_backtest(lo, lu, th)
+                if opt['total_cash'] < best_cash:
+                    best_cash   = opt['total_cash']
+                    best_params = (lo, lu, th)
 
-    unfilled = ORDER_SIZE
-    cumulative_cash = 0.0
-    current_ts = None
-    venues     = []
-    snapshots  = []   #collect each timestamp’s venue list
+    lo0, lu0, th0 = best_params
+    deltas = [-0.25, 0.0, 0.25]
+    best2, best_cash2 = best_params, best_cash
+    for dlo in deltas:
+        for dlu in deltas:
+            for dth in deltas:
+                lo = max(0, lo0 + dlo)
+                lu = max(0, lu0 + dlu)
+                th = max(0, th0 + dth)
+                opt, _ = run_backtest(lo, lu, th)
+                if opt['total_cash'] < best_cash2:
+                    best_cash2  = opt['total_cash']
+                    best2       = (lo, lu, th)
+    return best2
 
-    for msg in consumer:
-        data = msg.value
-        ts   = pd.to_datetime(data['ts_event'])
+#main func
+if __name__ == "__main__":
+    #find best parameters
+    lambda_over, lambda_under, theta_queue = optimize_parameters()
+    print(f"Best params → λ_over={lambda_over}, λ_under={lambda_under}, θ_queue={theta_queue}")
 
-        if current_ts is None:
-            current_ts = ts
-
-        if ts != current_ts:
-            snapshots.append(list(venues))
-            avail     = sum(v['ask_size'] for v in venues)
-            to_alloc  = min(unfilled, avail)
-
-            split, _ = allocate(to_alloc, venues, lambda_over, lambda_under, theta_queue)
-            if split is None:
-                split = [v['ask_size'] for v in venues]
-
-            filled = sum(min(split[i], venues[i]['ask_size']) for i in range(len(venues)))
-            cost   = compute_cost(split, venues, to_alloc, lambda_over, lambda_under, theta_queue)
-            cumulative_cash += cost
-            unfilled        = max(unfilled - filled, 0)
-
-            if unfilled == 0:
-                break
-
-            venues = []
-            current_ts = ts
-
-        venues.append({
-            'ask':      data['ask_px_00'],
-            'ask_size': data['ask_sz_00'],
-            'fee':      0.0,
-            'rebate':   0.0,
-        })
-
-    #run baselines and compute savings
+    optimized, snapshots = run_backtest(lambda_over, lambda_under, theta_queue)
     baselines = {
         'best_ask': run_best_ask(snapshots),
-        'twap':     run_twap(snapshots),
-        'vwap':     run_vwap(snapshots),
+        'twap': run_twap(snapshots),
+        'vwap': run_vwap(snapshots),
     }
-    optimized = {
-        'total_cash': cumulative_cash,
-        'avg_fill_px': cumulative_cash / ORDER_SIZE if ORDER_SIZE else 0
-    }
-    savings = {
-        k: ((b['avg_fill_px'] - optimized['avg_fill_px'])/b['avg_fill_px'])*10000
-        for k, b in baselines.items()
-    }
+    savings = {}
+    for key, base in baselines.items():
+        savings[key] = ((base['avg_fill_px'] - optimized['avg_fill_px']) / base['avg_fill_px']) * 10000
 
-    return optimized, baselines, savings
-
-if __name__ == "__main__":
-    params = {'lambda_over': 0.4, 'lambda_under': 0.6, 'theta_queue': 0.3}
-    optimized, baselines, savings = run_backtest(**params)
     final = {
-        'best_parameters': params,
+        'best_parameters': {'lambda_over': lambda_over, 'lambda_under': lambda_under, 'theta_queue': theta_queue},
         'optimized': optimized,
         'baselines': baselines,
-        'savings_vs_baselines_bps': savings
+        'savings_vs_baselines_bps': savings,
     }
     print(json.dumps(final, indent=2))
