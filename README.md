@@ -24,7 +24,7 @@ Final output prints a JSON with optimized results, baselines, and bps savings.
   kafka-python
   numpy
 
-#Steps to run this on AWS EC2 t2.micro instance:
+# Steps to run this on AWS EC2 t2.micro instance:
 
 #install all packages, as well as necessary tools from requirements.txt
 
@@ -32,7 +32,7 @@ sudo yum install -y java-1.8.0-openjdk-devel wget tmux
 
 pip install -r requirements.txt
 
-#Download and extract kafka:
+# Download and extract kafka:
 cd ~
 
 wget "https://archives.apache.org/kafka/3.5.1/kafka_2.13-3.5.1.tgz"
@@ -43,28 +43,28 @@ mv kafka_2.13-3.5.1 kafka
 
 cd kafka
 
-#Set Kafka heap for low memory since we're on t2.micro instance:
+# Set Kafka heap for low memory since we're on t2.micro instance:
 export KAFKA_HEAP_OPTS="-Xms128M" -Xmx256M"
 
 I used tmux to have multiple terminals in one window, but you don't have to, but keep in mind it would require 4-5 different terminals open
 
-#Startup Zookeeper:
+# Startup Zookeeper:
 
 bin/zookeeper-server-start.sh config/zookeeper.properties
 
-#Startup Kafka once Zookeeper is running(in a new terminal):
+# Startup Kafka once Zookeeper is running(in a new terminal):
 
 bin/kafka-server-start.sh config/server.properties
 (This is all from the kafka_2.13-3.5.1 folder)
 
-#Now create the topic(in a new terminal):
+# Now create the topic(in a new terminal):
 
 cd ~/kafka
 bin/kafka-topics.sh --create --topic mock_l1_stream \
   --bootstrap-server localhost:9092 \
   --partitions 1 --replication-factor 1
 
-#In a new terminal, clone my github page and download the csv file (not provided in my github repo as per instructions) and start up the kafka-producer, and in a new terminal, startup the backtest after the producer is running. 
+# In a new terminal, clone my github page and download the csv file (not provided in my github repo as per instructions) and start up the kafka-producer, and in a new terminal, startup the backtest after the producer is running. 
 
 Everything was able to run locally as well as on the AWS EC2 instance, feel free to connect with me on LinkedIn if anything doesn't work as intended. 
 
