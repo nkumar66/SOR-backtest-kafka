@@ -51,6 +51,6 @@ for _, row in window.iterrows():
     producer.send("mock_l1_stream", value=message)
     print(f"Sent at {message['ts_event']}: {message['ask_px_00']} @ {message['ask_sz_00']}")
 
-# 6. Clean up
+
 producer.flush()
 producer.close()
