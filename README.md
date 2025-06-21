@@ -34,9 +34,13 @@ pip install -r requirements.txt
 
 #Download and extract kafka:
 cd ~
+
 wget "https://archives.apache.org/kafka/3.5.1/kafka_2.13-3.5.1.tgz"
+
 tar -xzf kafka_2.13-3.5.1.tgz
+
 mv kafka_2.13-3.5.1 kafka
+
 cd kafka
 
 #Set Kafka heap for low memory since we're on t2.micro instance:
