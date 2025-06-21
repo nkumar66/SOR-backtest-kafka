@@ -21,14 +21,17 @@ Final output prints a JSON with optimized results, baselines, and bps savings.
 
 # In one terminal (or powershell)
 cd C:\kafka
+
 .\bin\windows\zookeeper-server-start.bat .\config\zookeeper.properties
 
 # In a second terminal (or powershell)
 cd C:\kafka
+
 .\bin\windows\kafka-server-start.bat .\config\server.properties
 
 # Create the Topic (in a third terminal)
 cd C:\kafka
+
 .\bin\windows\kafka-topics.bat --create --topic mock_l1_stream `
   --bootstrap-server localhost:9092 --partitions 1 --replication-factor 1
 
